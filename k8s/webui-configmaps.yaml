@@ -1,0 +1,531 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webui-html
+  namespace: ollama
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local // Ollama</title>
+    <style>
+      :root{
+        --bg: #191c20;
+        --panel: #1f232a;
+        --panel-raised: #262b33;
+        --line: #333a45;
+        --amber: #e8a33d;
+        --amber-dim: #8a662a;
+        --text: #e7e2d6;
+        --text-dim: #8b8f98;
+        --error: #d9695f;
+        --mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+        --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      }
+      *{box-sizing:border-box;}
+      html,body{height:100%;}
+      body{
+        margin:0;
+        background:
+          radial-gradient(ellipse at top left, #20242c 0%, var(--bg) 55%);
+        color:var(--text);
+        font-family:var(--sans);
+        display:flex;
+        flex-direction:column;
+      }
+
+      /* ---- header ---- */
+      header{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        padding:14px 20px;
+        border-bottom:1px solid var(--line);
+        background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+      }
+      .brand{
+        display:flex;
+        align-items:center;
+        gap:10px;
+      }
+      .brand .dot{
+        width:9px;height:9px;border-radius:50%;
+        background:var(--text-dim);
+        box-shadow:0 0 0 3px rgba(139,143,152,0.12);
+        transition:background .2s, box-shadow .2s;
+      }
+      .brand .dot.online{
+        background:var(--amber);
+        box-shadow:0 0 0 3px rgba(232,163,61,0.18), 0 0 10px rgba(232,163,61,0.6);
+      }
+      .brand .dot.error{
+        background:var(--error);
+        box-shadow:0 0 0 3px rgba(217,105,95,0.18);
+      }
+      .brand h1{
+        font-family:var(--mono);
+        font-size:14px;
+        letter-spacing:0.14em;
+        text-transform:uppercase;
+        margin:0;
+        color:var(--text);
+      }
+      .brand h1 span{color:var(--amber);}
+      .status-text{
+        font-family:var(--mono);
+        font-size:11px;
+        color:var(--text-dim);
+        letter-spacing:0.03em;
+      }
+
+      .controls{
+        display:flex;
+        align-items:center;
+        gap:10px;
+      }
+      select, input[type=text]{
+        background:var(--panel-raised);
+        border:1px solid var(--line);
+        color:var(--text);
+        font-family:var(--mono);
+        font-size:12px;
+        padding:7px 10px;
+        border-radius:6px;
+        outline:none;
+      }
+      select:focus, input[type=text]:focus{
+        border-color:var(--amber-dim);
+      }
+      button.icon-btn{
+        background:transparent;
+        border:1px solid var(--line);
+        color:var(--text-dim);
+        font-family:var(--mono);
+        font-size:11px;
+        padding:7px 10px;
+        border-radius:6px;
+        cursor:pointer;
+        transition:border-color .15s, color .15s;
+      }
+      button.icon-btn:hover{
+        border-color:var(--amber-dim);
+        color:var(--amber);
+      }
+
+      /* ---- main ---- */
+      main{
+        flex:1;
+        overflow-y:auto;
+        padding:28px 0 140px 0;
+      }
+      .thread{
+        max-width:760px;
+        margin:0 auto;
+        padding:0 20px;
+        display:flex;
+        flex-direction:column;
+        gap:22px;
+      }
+
+      .empty{
+        margin-top:14vh;
+        text-align:center;
+        color:var(--text-dim);
+        font-family:var(--mono);
+        font-size:13px;
+        line-height:1.8;
+      }
+      .empty .big{
+        font-size:34px;
+        color:var(--line);
+        letter-spacing:0.02em;
+        margin-bottom:10px;
+      }
+
+      .turn{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+      }
+      .role-label{
+        font-family:var(--mono);
+        font-size:10px;
+        letter-spacing:0.14em;
+        text-transform:uppercase;
+        color:var(--text-dim);
+      }
+      .turn.user .role-label::before{content:"you";}
+      .turn.assistant .role-label::before{content:attr(data-model);}
+
+      .bubble{
+        font-size:15px;
+        line-height:1.65;
+        white-space:pre-wrap;
+        word-wrap:break-word;
+      }
+      .turn.user .bubble{
+        color:var(--text);
+        background:var(--panel-raised);
+        border:1px solid var(--line);
+        border-radius:10px;
+        padding:12px 15px;
+        align-self:flex-start;
+      }
+      .turn.assistant .bubble{
+        color:var(--text);
+        border-left:2px solid var(--amber-dim);
+        padding-left:14px;
+      }
+      .turn.assistant.streaming .bubble::after{
+        content:"▌";
+        color:var(--amber);
+        animation:blink 1s steps(1) infinite;
+      }
+      @keyframes blink{50%{opacity:0;}}
+
+      .turn.error .bubble{
+        color:var(--error);
+        border-left:2px solid var(--error);
+        padding-left:14px;
+        font-family:var(--mono);
+        font-size:13px;
+      }
+
+      .meta{
+        font-family:var(--mono);
+        font-size:10.5px;
+        color:var(--text-dim);
+        opacity:0.7;
+      }
+
+      /* ---- composer ---- */
+      .composer-wrap{
+        position:sticky;
+        bottom:0;
+        background:linear-gradient(180deg, transparent, var(--bg) 30%);
+        padding:18px 0 22px 0;
+      }
+      form.composer{
+        max-width:760px;
+        margin:0 auto;
+        padding:0 20px;
+        display:flex;
+        gap:10px;
+        align-items:flex-end;
+      }
+      textarea{
+        flex:1;
+        resize:none;
+        background:var(--panel);
+        border:1px solid var(--line);
+        color:var(--text);
+        font-family:var(--sans);
+        font-size:14.5px;
+        line-height:1.5;
+        padding:12px 14px;
+        border-radius:10px;
+        outline:none;
+        max-height:200px;
+        min-height:46px;
+      }
+      textarea:focus{
+        border-color:var(--amber-dim);
+      }
+      textarea::placeholder{color:var(--text-dim);}
+
+      button.send{
+        background:var(--amber);
+        color:#221a0c;
+        border:none;
+        font-family:var(--mono);
+        font-weight:600;
+        font-size:12px;
+        letter-spacing:0.06em;
+        text-transform:uppercase;
+        padding:0 20px;
+        height:46px;
+        border-radius:10px;
+        cursor:pointer;
+        transition:filter .15s, opacity .15s;
+      }
+      button.send:hover{filter:brightness(1.08);}
+      button.send:disabled{
+        opacity:0.4;
+        cursor:not-allowed;
+      }
+      button.stop{
+        background:transparent;
+        border:1px solid var(--error);
+        color:var(--error);
+      }
+
+      .hint{
+        max-width:760px;
+        margin:8px auto 0 auto;
+        padding:0 22px;
+        font-family:var(--mono);
+        font-size:10.5px;
+        color:var(--text-dim);
+      }
+
+      /* scrollbar */
+      main::-webkit-scrollbar{width:8px;}
+      main::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+    </style>
+    </head>
+    <body>
+
+    <header>
+      <div class="brand">
+        <div class="dot" id="statusDot"></div>
+        <h1>local<span>::</span>ollama</h1>
+      </div>
+      <div class="status-text" id="statusText">checking connection…</div>
+      <div class="controls">
+        <select id="modelSelect" title="Model">
+          <option value="">loading models…</option>
+        </select>
+        <input type="text" id="hostInput" value="" placeholder="same origin (default)" title="Override Ollama host, e.g. http://ollama-service:11434" style="width:220px;">
+        <button class="icon-btn" id="reconnectBtn">reconnect</button>
+        <button class="icon-btn" id="clearBtn">clear</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="thread" id="thread">
+        <div class="empty" id="emptyState">
+          <div class="big">?</div>
+          ask something.<br>your local model will answer.
+        </div>
+      </div>
+    </main>
+
+    <div class="composer-wrap">
+      <form class="composer" id="composer">
+        <textarea id="promptInput" placeholder="Ask a question… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+        <button type="submit" class="send" id="sendBtn">Ask</button>
+      </form>
+      <div class="hint">Talks to Ollama through this page's own origin (nginx proxies /api/ to the ollama Service). Only set a host override if pointing at a different cluster/host.</div>
+    </div>
+
+    <script>
+    (function(){
+      const thread = document.getElementById('thread');
+      const emptyState = document.getElementById('emptyState');
+      const composer = document.getElementById('composer');
+      const promptInput = document.getElementById('promptInput');
+      const sendBtn = document.getElementById('sendBtn');
+      const modelSelect = document.getElementById('modelSelect');
+      const hostInput = document.getElementById('hostInput');
+      const statusDot = document.getElementById('statusDot');
+      const statusText = document.getElementById('statusText');
+      const reconnectBtn = document.getElementById('reconnectBtn');
+      const clearBtn = document.getElementById('clearBtn');
+      const main = document.getElementById('main');
+
+      let history = []; // {role, content}
+      let controller = null;
+
+      function host(){
+        return hostInput.value.trim().replace(/\/+$/,'');
+      }
+
+      function setStatus(state, text){
+        statusDot.classList.remove('online','error');
+        if(state==='online') statusDot.classList.add('online');
+        if(state==='error') statusDot.classList.add('error');
+        statusText.textContent = text;
+      }
+
+      async function loadModels(){
+        setStatus('', 'checking connection…');
+        modelSelect.innerHTML = '<option value="">loading models…</option>';
+        try{
+          const res = await fetch(host() + '/api/tags');
+          if(!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          const models = (data.models || []);
+          if(models.length === 0){
+            modelSelect.innerHTML = '<option value="">no models found</option>';
+            setStatus('error', 'connected, but no models pulled');
+            return;
+          }
+          modelSelect.innerHTML = models.map(m =>
+            `<option value="${m.name}">${m.name}</option>`
+          ).join('');
+          setStatus('online', `connected · ${models.length} model${models.length===1?'':'s'}`);
+        }catch(err){
+          modelSelect.innerHTML = '<option value="">unavailable</option>';
+          setStatus('error', 'cannot reach Ollama at this host');
+        }
+      }
+
+      function autoGrow(){
+        promptInput.style.height = 'auto';
+        promptInput.style.height = Math.min(promptInput.scrollHeight, 200) + 'px';
+      }
+      promptInput.addEventListener('input', autoGrow);
+      promptInput.addEventListener('keydown', (e)=>{
+        if(e.key === 'Enter' && !e.shiftKey){
+          e.preventDefault();
+          composer.requestSubmit();
+        }
+      });
+
+      function scrollToBottom(){
+        main.scrollTop = main.scrollHeight;
+      }
+
+      function addTurn(role, content, opts){
+        opts = opts || {};
+        if(emptyState) emptyState.style.display = 'none';
+        const turn = document.createElement('div');
+        turn.className = 'turn ' + role + (opts.streaming ? ' streaming' : '') + (opts.error ? ' error' : '');
+        const label = document.createElement('div');
+        label.className = 'role-label';
+        if(role === 'assistant') label.setAttribute('data-model', opts.model || 'model');
+        turn.appendChild(label);
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.textContent = content;
+        turn.appendChild(bubble);
+        thread.appendChild(turn);
+        scrollToBottom();
+        return { turn, bubble };
+      }
+
+      async function sendMessage(text){
+        const model = modelSelect.value;
+        if(!model){
+          addTurn('error', 'No model selected. Pick a model from the dropdown at the top.', {error:true});
+          return;
+        }
+
+        addTurn('user', text);
+        history.push({role:'user', content:text});
+
+        const { turn, bubble } = addTurn('assistant', '', {streaming:true, model});
+        sendBtn.textContent = 'Stop';
+        sendBtn.classList.add('stop');
+        controller = new AbortController();
+
+        let full = '';
+        try{
+          const res = await fetch(host() + '/api/chat', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              model: model,
+              messages: history,
+              stream: true
+            }),
+            signal: controller.signal
+          });
+
+          if(!res.ok || !res.body){
+            throw new Error('HTTP ' + res.status);
+          }
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = '';
+
+          while(true){
+            const { value, done } = await reader.read();
+            if(done) break;
+            buf += decoder.decode(value, {stream:true});
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for(const line of lines){
+              if(!line.trim()) continue;
+              let obj;
+              try{ obj = JSON.parse(line); }catch(e){ continue; }
+              if(obj.message && obj.message.content){
+                full += obj.message.content;
+                bubble.textContent = full;
+                scrollToBottom();
+              }
+              if(obj.done){
+                turn.classList.remove('streaming');
+              }
+            }
+          }
+          history.push({role:'assistant', content: full});
+        }catch(err){
+          turn.classList.remove('streaming');
+          if(err.name === 'AbortError'){
+            bubble.textContent = full + '\n\n[stopped]';
+          } else {
+            turn.className = 'turn error';
+            bubble.textContent = 'Request failed: ' + err.message + '. Check the host and that Ollama is running.';
+            history.pop();
+          }
+        }finally{
+          controller = null;
+          sendBtn.textContent = 'Ask';
+          sendBtn.classList.remove('stop');
+        }
+      }
+
+      composer.addEventListener('submit', (e)=>{
+        e.preventDefault();
+        if(controller){
+          controller.abort();
+          return;
+        }
+        const text = promptInput.value.trim();
+        if(!text) return;
+        promptInput.value = '';
+        autoGrow();
+        sendMessage(text);
+      });
+
+      clearBtn.addEventListener('click', ()=>{
+        history = [];
+        thread.innerHTML = '';
+        thread.appendChild(emptyState);
+        emptyState.style.display = 'block';
+      });
+
+      reconnectBtn.addEventListener('click', loadModels);
+      hostInput.addEventListener('change', loadModels);
+
+      loadModels();
+    })();
+    </script>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webui-nginx-conf
+  namespace: ollama
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+
+        root /usr/share/nginx/html;
+        index index.html;
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        location /api/ {
+            proxy_pass http://ollama-service.ollama.svc.cluster.local:11434/api/;
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_cache off;
+            chunked_transfer_encoding on;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 300s;
+        }
+    }

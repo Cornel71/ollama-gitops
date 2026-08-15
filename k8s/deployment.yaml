@@ -13,6 +13,22 @@ spec:
       labels:
         app: ollama
     spec:
+      initContainers:
+      - name: download-model
+        image: ollama/ollama:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            ollama serve &
+            echo "Waiting for temporary Ollama server to start...";
+            until client_out=$(ollama list 2>&1); do sleep 1; done;
+            echo "Downloading phi3 model (you can change this to mistral, llama3, etc.)...";
+            ollama pull ph13;
+            echo "Model downloaded successfully!";
+        volumeMounts:
+        - name: ollama-storage
+          mountPath: /root/.ollama
+
       containers:
       - name: ollama
         image: ollama/ollama:latest
@@ -29,6 +45,9 @@ spec:
         volumeMounts:
         - name: ollama-storage
           mountPath: /root/.ollama
+
       volumes:
       - name: ollama-storage
-        emptyDir: {}
+        hostPath:
+          path: /data/ollama
+          type: DirectoryOrCreate
