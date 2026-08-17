@@ -13,6 +13,8 @@ spec:
       labels:
         app: ollama
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: node1
       initContainers:
       - name: download-model
         image: ollama/ollama:latest

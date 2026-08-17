@@ -795,6 +795,8 @@ spec:
       labels:
         app: searxng
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: node1
       containers:
         - name: searxng
           image: docker.io/searxng/searxng:latest
