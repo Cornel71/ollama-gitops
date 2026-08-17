@@ -22,6 +22,7 @@ data:
         --text: #e7e2d6;
         --text-dim: #8b8f98;
         --error: #d9695f;
+        --link: #7fb0e0;
         --mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
         --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
       }
@@ -45,6 +46,8 @@ data:
         padding:14px 20px;
         border-bottom:1px solid var(--line);
         background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+        flex-wrap:wrap;
+        gap:10px;
       }
       .brand{
         display:flex;
@@ -85,6 +88,7 @@ data:
         display:flex;
         align-items:center;
         gap:10px;
+        flex-wrap:wrap;
       }
       select, input[type=text]{
         background:var(--panel-raised);
@@ -113,6 +117,39 @@ data:
       button.icon-btn:hover{
         border-color:var(--amber-dim);
         color:var(--amber);
+      }
+
+      /* web search toggle */
+      button.toggle-btn{
+        background:transparent;
+        border:1px solid var(--line);
+        color:var(--text-dim);
+        font-family:var(--mono);
+        font-size:11px;
+        padding:7px 12px;
+        border-radius:6px;
+        cursor:pointer;
+        display:flex;
+        align-items:center;
+        gap:6px;
+        transition:border-color .15s, color .15s, background .15s;
+      }
+      button.toggle-btn:hover{
+        border-color:var(--amber-dim);
+        color:var(--amber);
+      }
+      button.toggle-btn.active{
+        background:rgba(232,163,61,0.12);
+        border-color:var(--amber);
+        color:var(--amber);
+      }
+      button.toggle-btn .led{
+        width:6px;height:6px;border-radius:50%;
+        background:var(--text-dim);
+      }
+      button.toggle-btn.active .led{
+        background:var(--amber);
+        box-shadow:0 0 6px rgba(232,163,61,0.8);
       }
 
       /* ---- main ---- */
@@ -159,6 +196,7 @@ data:
       }
       .turn.user .role-label::before{content:"you";}
       .turn.assistant .role-label::before{content:attr(data-model);}
+      .turn.search .role-label::before{content:"web search";}
 
       .bubble{
         font-size:15px;
@@ -193,6 +231,41 @@ data:
         font-family:var(--mono);
         font-size:13px;
       }
+
+      /* search results card */
+      .turn.search .bubble{
+        border-left:2px solid var(--link);
+        padding-left:14px;
+      }
+      .search-status{
+        font-family:var(--mono);
+        font-size:11.5px;
+        color:var(--text-dim);
+        margin-bottom:6px;
+      }
+      .search-results{
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+      }
+      .search-result{
+        font-size:13px;
+        line-height:1.5;
+      }
+      .search-result a{
+        color:var(--link);
+        text-decoration:none;
+        font-weight:600;
+      }
+      .search-result a:hover{text-decoration:underline;}
+      .search-result .url{
+        display:block;
+        font-family:var(--mono);
+        font-size:10.5px;
+        color:var(--text-dim);
+        margin:1px 0 3px 0;
+      }
+      .search-result .snippet{color:var(--text-dim);}
 
       .meta{
         font-family:var(--mono);
@@ -250,6 +323,7 @@ data:
         border-radius:10px;
         cursor:pointer;
         transition:filter .15s, opacity .15s;
+        white-space:nowrap;
       }
       button.send:hover{filter:brightness(1.08);}
       button.send:disabled{
@@ -288,7 +362,10 @@ data:
         <select id="modelSelect" title="Model">
           <option value="">loading models…</option>
         </select>
-        <input type="text" id="hostInput" value="" placeholder="same origin (default)" title="Override Ollama host, e.g. http://ollama-service:11434" style="width:220px;">
+        <input type="text" id="hostInput" value="" placeholder="same origin (default)" title="Override Ollama host, e.g. http://ollama-service:11434" style="width:200px;">
+        <button type="button" class="toggle-btn" id="webSearchToggle" title="Search the web before asking the model">
+          <span class="led"></span>web search
+        </button>
         <button class="icon-btn" id="reconnectBtn">reconnect</button>
         <button class="icon-btn" id="clearBtn">clear</button>
       </div>
@@ -308,7 +385,7 @@ data:
         <textarea id="promptInput" placeholder="Ask a question… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
         <button type="submit" class="send" id="sendBtn">Ask</button>
       </form>
-      <div class="hint">Talks to Ollama through this page's own origin (nginx proxies /api/ to the ollama Service). Only set a host override if pointing at a different cluster/host.</div>
+      <div class="hint">Talks to Ollama through this page's own origin (nginx proxies /api/ to the ollama Service). Web search (toggle above) queries a self-hosted SearXNG instance via /search/ and feeds top results to the model as context.</div>
     </div>
 
     <script>
@@ -324,10 +401,12 @@ data:
       const statusText = document.getElementById('statusText');
       const reconnectBtn = document.getElementById('reconnectBtn');
       const clearBtn = document.getElementById('clearBtn');
+      const webSearchToggle = document.getElementById('webSearchToggle');
       const main = document.getElementById('main');
 
       let history = []; // {role, content}
       let controller = null;
+      let webSearchEnabled = false;
 
       function host(){
         return hostInput.value.trim().replace(/\/+$/,'');
@@ -375,6 +454,11 @@ data:
         }
       });
 
+      webSearchToggle.addEventListener('click', ()=>{
+        webSearchEnabled = !webSearchEnabled;
+        webSearchToggle.classList.toggle('active', webSearchEnabled);
+      });
+
       function scrollToBottom(){
         main.scrollTop = main.scrollHeight;
       }
@@ -397,6 +481,63 @@ data:
         return { turn, bubble };
       }
 
+      // Runs a web search against the SearXNG instance proxied at /search/
+      // Returns { context, results } where context is a text block to feed
+      // the model and results is the raw array used for the citation UI.
+      async function runWebSearch(query){
+        const { turn, bubble } = addTurn('search', '', {});
+        const status = document.createElement('div');
+        status.className = 'search-status';
+        status.textContent = 'searching the web…';
+        bubble.appendChild(status);
+
+        try{
+          const url = host() + '/search/search?format=json&q=' + encodeURIComponent(query);
+          const res = await fetch(url);
+          if(!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          const results = (data.results || []).slice(0, 5);
+
+          if(results.length === 0){
+            status.textContent = 'no web results found';
+            return { context: '', results: [] };
+          }
+
+          status.textContent = `${results.length} result${results.length===1?'':'s'}`;
+          const list = document.createElement('div');
+          list.className = 'search-results';
+          results.forEach((r, i) => {
+            const item = document.createElement('div');
+            item.className = 'search-result';
+            const a = document.createElement('a');
+            a.href = r.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+            a.textContent = `${i+1}. ${r.title || r.url}`;
+            const urlLine = document.createElement('span');
+            urlLine.className = 'url';
+            urlLine.textContent = r.url;
+            const snippet = document.createElement('div');
+            snippet.className = 'snippet';
+            snippet.textContent = r.content || '';
+            item.appendChild(a);
+            item.appendChild(urlLine);
+            item.appendChild(snippet);
+            list.appendChild(item);
+          });
+          bubble.appendChild(list);
+          scrollToBottom();
+
+          const context = results.map((r, i) =>
+            `[${i+1}] ${r.title || r.url}\nURL: ${r.url}\n${r.content || ''}`
+          ).join('\n\n');
+
+          return { context, results };
+        }catch(err){
+          status.textContent = 'web search failed: ' + err.message;
+          turn.classList.add('error');
+          return { context: '', results: [] };
+        }
+      }
+
       async function sendMessage(text){
         const model = modelSelect.value;
         if(!model){
@@ -405,7 +546,21 @@ data:
         }
 
         addTurn('user', text);
-        history.push({role:'user', content:text});
+
+        let modelContent = text;
+        if(webSearchEnabled){
+          const { context } = await runWebSearch(text);
+          if(context){
+            modelContent =
+              'Use the following web search results to help answer the question. ' +
+              'Cite sources by their [n] number where relevant, and note if the ' +
+              'results don\'t fully answer the question.\n\n' +
+              'SEARCH RESULTS:\n' + context +
+              '\n\nQUESTION: ' + text;
+          }
+        }
+
+        history.push({role:'user', content: modelContent});
 
         const { turn, bubble } = addTurn('assistant', '', {streaming:true, model});
         sendBtn.textContent = 'Stop';
@@ -528,4 +683,108 @@ data:
             proxy_set_header X-Real-IP $remote_addr;
             proxy_read_timeout 300s;
         }
+
+        location /search/ {
+            proxy_pass http://searxng-service.ollama.svc.cluster.local:8080/;
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_cache off;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_read_timeout 30s;
+        }
     }
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webui-searxng-conf
+  namespace: ollama
+data:
+  settings.yml: |
+    use_default_settings: true
+
+    general:
+      instance_name: "local-searxng"
+
+    search:
+      formats:
+        - html
+        - json
+
+    server:
+      secret_key: "9066c1bed3df7c8a8a82037ad28ca47d84e786ba39c4a38b7dbd9310c2215ebc"
+      limiter: false
+      image_proxy: false
+
+    ui:
+      static_use_hash: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+  namespace: ollama
+  labels:
+    app: searxng
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: searxng
+  template:
+    metadata:
+      labels:
+        app: searxng
+    spec:
+      containers:
+        - name: searxng
+          image: docker.io/searxng/searxng:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: BASE_URL
+              value: "http://searxng-service.ollama.svc.cluster.local:8080/"
+            - name: INSTANCE_NAME
+              value: "local-searxng"
+          volumeMounts:
+            - name: searxng-conf
+              mountPath: /etc/searxng/settings.yml
+              subPath: settings.yml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+      volumes:
+        - name: searxng-conf
+          configMap:
+            name: webui-searxng-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng-service
+  namespace: ollama
+spec:
+  selector:
+    app: searxng
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: ClusterIP
