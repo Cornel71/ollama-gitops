@@ -494,8 +494,22 @@ data:
         try{
           const url = host() + '/search/search?format=json&q=' + encodeURIComponent(query);
           const res = await fetch(url);
-          if(!res.ok) throw new Error('HTTP ' + res.status);
-          const data = await res.json();
+          const raw = await res.text();
+
+          let data;
+          try{
+            data = JSON.parse(raw);
+          }catch(parseErr){
+            // The upstream didn't return JSON at all (nginx 502/504,
+            // SearXNG 403 from the bot-detection/limiter, a 500 from a
+            // broken engine, etc). Surface the real status + a snippet
+            // instead of a bare "unexpected token" parse error.
+            const snippet = raw.slice(0, 120).replace(/\s+/g, ' ').trim();
+            throw new Error(`HTTP ${res.status} non-JSON response — ${snippet || '(empty body)'}`);
+          }
+          if(!res.ok){
+            throw new Error(`HTTP ${res.status} — ${data.message || data.error || raw.slice(0,120)}`);
+          }
           const results = (data.results || []).slice(0, 5);
 
           if(results.length === 0){
@@ -684,6 +698,8 @@ data:
             proxy_read_timeout 300s;
         }
 
+        # Web search: proxies to the self-hosted SearXNG Service below.
+        # /search/search?format=json&q=... is what the frontend calls.
         location /search/ {
             proxy_pass http://searxng-service.ollama.svc.cluster.local:8080/;
             proxy_http_version 1.1;
@@ -720,6 +736,23 @@ data:
 
     ui:
       static_use_hash: true
+
+    outgoing:
+      request_timeout: 6.0
+      max_request_timeout: 10.0
+    engines:
+      - name: wikidata
+        disabled: true
+      - name: duckduckgo
+        disabled: true
+      - name: startpage
+        disabled: true
+      - name: bing
+        disabled: false
+      - name: brave
+        disabled: false
+      - name: mojeek
+        disabled: false
 ---
 apiVersion: apps/v1
 kind: Deployment
