@@ -408,6 +408,19 @@ data:
       let controller = null;
       let webSearchEnabled = false;
 
+      // Safety net: even without the search-context bug, a long chat
+      // session's history grows unbounded and can eventually push the
+      // model past its context window (slow generation, truncated
+      // replies, or what looks like "not responding"). Cap how many
+      // messages we keep so old turns roll off automatically. Adjust to
+      // taste — bigger context models can raise this.
+      const MAX_HISTORY_MESSAGES = 24;
+      function trimHistory(){
+        if(history.length > MAX_HISTORY_MESSAGES){
+          history = history.slice(history.length - MAX_HISTORY_MESSAGES);
+        }
+      }
+
       function host(){
         return hostInput.value.trim().replace(/\/+$/,'');
       }
@@ -561,11 +574,11 @@ data:
 
         addTurn('user', text);
 
-        let modelContent = text;
+        let requestContent = text;
         if(webSearchEnabled){
           const { context } = await runWebSearch(text);
           if(context){
-            modelContent =
+            requestContent =
               'Use the following web search results to help answer the question. ' +
               'Cite sources by their [n] number where relevant, and note if the ' +
               'results don\'t fully answer the question.\n\n' +
@@ -574,7 +587,16 @@ data:
           }
         }
 
-        history.push({role:'user', content: modelContent});
+        // IMPORTANT: only the plain question goes into persistent history.
+        // Search results are large (title+url+snippet x5) and are only
+        // relevant to *this* turn — if we stored the augmented version in
+        // history, every subsequent request would resend it, and it would
+        // keep compounding turn after turn. That's what was blowing up the
+        // context window and making Ollama grind to a crawl / eventually
+        // truncate mid-response. The model only sees the search context for
+        // the turn that actually needs it.
+        const requestMessages = history.concat([{role:'user', content: requestContent}]);
+        history.push({role:'user', content: text});
 
         const { turn, bubble } = addTurn('assistant', '', {streaming:true, model});
         sendBtn.textContent = 'Stop';
@@ -588,7 +610,7 @@ data:
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({
               model: model,
-              messages: history,
+              messages: requestMessages,
               stream: true
             }),
             signal: controller.signal
@@ -623,6 +645,7 @@ data:
             }
           }
           history.push({role:'assistant', content: full});
+          trimHistory();
         }catch(err){
           turn.classList.remove('streaming');
           if(err.name === 'AbortError'){
