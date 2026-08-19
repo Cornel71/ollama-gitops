@@ -523,15 +523,7 @@ data:
           if(!res.ok){
             throw new Error(`HTTP ${res.status} — ${data.message || data.error || raw.slice(0,120)}`);
           }
-          // Some engines (Mojeek, some Bing entries) return only a title +
-          // url with no body snippet — feeding those to the model gives it
-          // nothing but a headline to reason over. Prefer results that
-          // actually have a substantive snippet; only fall back to
-          // headline-only results if we don't have enough with content.
-          const allResults = data.results || [];
-          const withContent = allResults.filter(r => r.content && r.content.trim().length > 40);
-          const withoutContent = allResults.filter(r => !(r.content && r.content.trim().length > 40));
-          const results = withContent.concat(withoutContent).slice(0, 5);
+          const results = (data.results || []).slice(0, 5);
 
           if(results.length === 0){
             status.textContent = 'no web results found';
@@ -729,6 +721,8 @@ data:
             proxy_read_timeout 300s;
         }
 
+        # Web search: proxies to the self-hosted SearXNG Service below.
+        # /search/search?format=json&q=... is what the frontend calls.
         location /search/ {
             proxy_pass http://searxng-service.ollama.svc.cluster.local:8080/;
             proxy_http_version 1.1;
@@ -783,8 +777,6 @@ data:
         disabled: false
       - name: mojeek
         disabled: false
-      - name: wikipedia
-        disabled: false
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -803,6 +795,8 @@ spec:
       labels:
         app: searxng
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: node1
       containers:
         - name: searxng
           image: docker.io/searxng/searxng:latest
