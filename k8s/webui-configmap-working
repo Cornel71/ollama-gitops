@@ -408,12 +408,6 @@ data:
       let controller = null;
       let webSearchEnabled = false;
 
-      // Safety net: even without the search-context bug, a long chat
-      // session's history grows unbounded and can eventually push the
-      // model past its context window (slow generation, truncated
-      // replies, or what looks like "not responding"). Cap how many
-      // messages we keep so old turns roll off automatically. Adjust to
-      // taste — bigger context models can raise this.
       const MAX_HISTORY_MESSAGES = 24;
       function trimHistory(){
         if(history.length > MAX_HISTORY_MESSAGES){
@@ -494,9 +488,6 @@ data:
         return { turn, bubble };
       }
 
-      // Runs a web search against the SearXNG instance proxied at /search/
-      // Returns { context, results } where context is a text block to feed
-      // the model and results is the raw array used for the citation UI.
       async function runWebSearch(query){
         const { turn, bubble } = addTurn('search', '', {});
         const status = document.createElement('div');
@@ -513,10 +504,6 @@ data:
           try{
             data = JSON.parse(raw);
           }catch(parseErr){
-            // The upstream didn't return JSON at all (nginx 502/504,
-            // SearXNG 403 from the bot-detection/limiter, a 500 from a
-            // broken engine, etc). Surface the real status + a snippet
-            // instead of a bare "unexpected token" parse error.
             const snippet = raw.slice(0, 120).replace(/\s+/g, ' ').trim();
             throw new Error(`HTTP ${res.status} non-JSON response — ${snippet || '(empty body)'}`);
           }
@@ -587,14 +574,6 @@ data:
           }
         }
 
-        // IMPORTANT: only the plain question goes into persistent history.
-        // Search results are large (title+url+snippet x5) and are only
-        // relevant to *this* turn — if we stored the augmented version in
-        // history, every subsequent request would resend it, and it would
-        // keep compounding turn after turn. That's what was blowing up the
-        // context window and making Ollama grind to a crawl / eventually
-        // truncate mid-response. The model only sees the search context for
-        // the turn that actually needs it.
         const requestMessages = history.concat([{role:'user', content: requestContent}]);
         history.push({role:'user', content: text});
 
@@ -721,8 +700,6 @@ data:
             proxy_read_timeout 300s;
         }
 
-        # Web search: proxies to the self-hosted SearXNG Service below.
-        # /search/search?format=json&q=... is what the frontend calls.
         location /search/ {
             proxy_pass http://searxng-service.ollama.svc.cluster.local:8080/;
             proxy_http_version 1.1;

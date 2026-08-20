@@ -408,12 +408,6 @@ data:
       let controller = null;
       let webSearchEnabled = false;
 
-      // Safety net: even without the search-context bug, a long chat
-      // session's history grows unbounded and can eventually push the
-      // model past its context window (slow generation, truncated
-      // replies, or what looks like "not responding"). Cap how many
-      // messages we keep so old turns roll off automatically. Adjust to
-      // taste — bigger context models can raise this.
       const MAX_HISTORY_MESSAGES = 24;
       function trimHistory(){
         if(history.length > MAX_HISTORY_MESSAGES){
@@ -494,9 +488,6 @@ data:
         return { turn, bubble };
       }
 
-      // Runs a web search against the SearXNG instance proxied at /search/
-      // Returns { context, results } where context is a text block to feed
-      // the model and results is the raw array used for the citation UI.
       async function runWebSearch(query){
         const { turn, bubble } = addTurn('search', '', {});
         const status = document.createElement('div');
@@ -523,11 +514,6 @@ data:
           if(!res.ok){
             throw new Error(`HTTP ${res.status} — ${data.message || data.error || raw.slice(0,120)}`);
           }
-          // Some engines (Mojeek, some Bing entries) return only a title +
-          // url with no body snippet — feeding those to the model gives it
-          // nothing but a headline to reason over. Prefer results that
-          // actually have a substantive snippet; only fall back to
-          // headline-only results if we don't have enough with content.
           const allResults = data.results || [];
           const withContent = allResults.filter(r => r.content && r.content.trim().length > 40);
           const withoutContent = allResults.filter(r => !(r.content && r.content.trim().length > 40));
@@ -561,8 +547,17 @@ data:
           bubble.appendChild(list);
           scrollToBottom();
 
+          // Cap each snippet's length before it goes to the model — a
+          // full Wikipedia summary can run 500+ tokens on its own, and
+          // with 5 results that adds up fast even with a bigger num_ctx.
+          const MAX_SNIPPET_CHARS = 400;
+          const truncate = (s) => {
+            if(!s) return '';
+            return s.length > MAX_SNIPPET_CHARS ? s.slice(0, MAX_SNIPPET_CHARS) + '…' : s;
+          };
+
           const context = results.map((r, i) =>
-            `[${i+1}] ${r.title || r.url}\nURL: ${r.url}\n${r.content || ''}`
+            `[${i+1}] ${r.title || r.url}\nURL: ${r.url}\n${truncate(r.content)}`
           ).join('\n\n');
 
           return { context, results };
@@ -595,14 +590,6 @@ data:
           }
         }
 
-        // IMPORTANT: only the plain question goes into persistent history.
-        // Search results are large (title+url+snippet x5) and are only
-        // relevant to *this* turn — if we stored the augmented version in
-        // history, every subsequent request would resend it, and it would
-        // keep compounding turn after turn. That's what was blowing up the
-        // context window and making Ollama grind to a crawl / eventually
-        // truncate mid-response. The model only sees the search context for
-        // the turn that actually needs it.
         const requestMessages = history.concat([{role:'user', content: requestContent}]);
         history.push({role:'user', content: text});
 
@@ -619,7 +606,11 @@ data:
             body: JSON.stringify({
               model: model,
               messages: requestMessages,
-              stream: true
+              stream: true,
+              options: {
+                num_ctx: 8192,
+                num_predict: -1
+              }
             }),
             signal: controller.signal
           });
@@ -770,6 +761,7 @@ data:
     outgoing:
       request_timeout: 6.0
       max_request_timeout: 10.0
+
     engines:
       - name: wikidata
         disabled: true
